@@ -295,6 +295,16 @@ class FlashMaskAttention(MegatronModule):
 
         S, B = query.size(0), query.size(1)
 
+        # ---- 一次性日志确认 FlashMask 被调用 ----
+        if not getattr(FlashMaskAttention, '_logged', False):
+            from megatron.training import print_rank_0
+            print_rank_0(
+                f"[FlashMask] layer={self.layer_number} "
+                f"S={S} B={B} H={query.size(2)} D={query.size(3)} "
+                f"causal={attn_mask_type.name} dtype={query.dtype}"
+            )
+            FlashMaskAttention._logged = True
+
         # GQA: replicate key/value to match query heads
         if self.gqa_ratio > 1:
             key = key.repeat_interleave(self.gqa_ratio, dim=2)
