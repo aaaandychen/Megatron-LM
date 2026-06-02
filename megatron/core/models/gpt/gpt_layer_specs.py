@@ -471,6 +471,89 @@ def get_gpt_layer_local_spec(*args, **kwargs) -> ModuleSpec:
     )
 
 
+def get_gpt_layer_with_flashmask_submodules(
+    num_experts: Optional[int] = None,
+    moe_grouped_gemm: Optional[bool] = False,
+    qk_layernorm: Optional[bool] = False,
+    multi_latent_attention: Optional[bool] = False,
+    qk_l2_norm: Optional[bool] = False,
+    normalization: str = "LayerNorm",
+    use_kitchen: bool = False,
+    use_kitchen_attention: bool = False,
+    kitchen_attention_backend: str = "sdpa",
+) -> TransformerLayerSubmodules:
+    """
+    FlashMask V2 attention 专用 submodules。
+
+    Attention 使用 flashmask_pybind 算子（仅 SM90+），
+    其余 linear/layernorm/activation 沿用本地 Megatron-Core 实现。
+
+    不支持:
+      - fp8 训练（需要 TE）
+      - multi_latent_attention (MLA)
+      - Context Parallelism
+
+    Args:
+        num_experts (int, optional): Number of experts for MoE. Defaults to None.
+        moe_grouped_gemm (bool, optional): To use Grouped GEMM. Defaults to False.
+        qk_layernorm (bool, optional): To use layernorm for queries/keys. Defaults to False.
+        multi_latent_attention (bool, optional): To use MLA. Defaults to False.
+        qk_l2_norm (bool, optional): To use l2 norm for queries/keys. Defaults to False.
+        normalization (str): "LayerNorm" or "RMSNorm". Defaults to "LayerNorm".
+        use_kitchen (bool): Deprecated. For compatibility.
+        use_kitchen_attention (bool): Deprecated. For compatibility.
+        kitchen_attention_backend (str): Deprecated. For compatibility.
+
+    Returns:
+        TransformerLayerSubmodules configured with FlashMaskAttention.
+    """
+    from megatron.core.models.backends import FlashMaskSpecProvider
+
+    assert not multi_latent_attention, "FlashMask does not support MLA."
+
+    backend = FlashMaskSpecProvider()
+
+    # 调整 RMS norm
+    if normalization == "RMSNorm":
+        layer_norm = backend.layer_norm(rms_norm=True, for_qk=False, has_residual=True)
+        qk_norm = backend.layer_norm(rms_norm=True, for_qk=True)
+    else:
+        layer_norm = backend.layer_norm(rms_norm=False, for_qk=False, has_residual=True)
+        qk_norm = backend.layer_norm(rms_norm=False, for_qk=True)
+
+    mlp = get_mlp_module_spec_for_backend(
+        backend=backend, num_experts=num_experts, moe_grouped_gemm=moe_grouped_gemm
+    )
+
+    return TransformerLayerSubmodules(
+        input_layernorm=layer_norm,
+        self_attention=ModuleSpec(
+            module=SelfAttention,
+            params={"attn_mask_type": AttnMaskType.causal},
+            submodules=SelfAttentionSubmodules(
+                linear_qkv=backend.column_parallel_linear(),
+                core_attention=backend.core_attention(),
+                linear_proj=backend.row_parallel_linear(),
+                q_layernorm=qk_norm if qk_layernorm else IdentityOp,
+                k_layernorm=qk_norm if qk_layernorm else IdentityOp,
+            ),
+        ),
+        self_attn_bda=get_bias_dropout_add,
+        pre_mlp_layernorm=layer_norm if num_experts else IdentityOp,
+        mlp=mlp,
+        mlp_bda=get_bias_dropout_add,
+    )
+
+
+@copy_signature(get_gpt_layer_with_flashmask_submodules)
+def get_gpt_layer_flashmask_spec(*args, **kwargs) -> ModuleSpec:
+    """Use this spec for FlashMask V2 attention with local Megatron-Core modules."""
+    return ModuleSpec(
+        module=TransformerLayer,
+        submodules=get_gpt_layer_with_flashmask_submodules(*args, **kwargs),
+    )
+
+
 def _get_mlp_module_spec(
     use_te: Optional[bool] = True,
     num_experts: Optional[int] = None,

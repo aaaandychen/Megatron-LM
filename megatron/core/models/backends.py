@@ -200,3 +200,61 @@ class InferenceSpecProvider(BackendSpecProvider):
                 activation_func=self.activation_func(),
             ),
         )
+
+
+class FlashMaskSpecProvider(BackendSpecProvider):
+    """
+    FlashMask V2 attention 后端。
+
+    Attention 使用自研 flashmask_pybind 算子（SM90+），
+    其余 linear/layernorm/activation 沿用 LocalSpecProvider 的纯 PyTorch 实现。
+
+    前置条件:
+      - flashmask_pybind 模块已编译并加入 PYTHONPATH
+      - GPU 架构 >= SM90 (H100/H800)
+    """
+
+    def column_parallel_linear(self) -> type:
+        """Which column parallel linear module the backend uses"""
+        return ColumnParallelLinear
+
+    def row_parallel_linear(self) -> type[RowParallelLinear]:
+        """Which row parallel linear module the backend uses"""
+        return RowParallelLinear
+
+    def fuse_layernorm_and_linear(self) -> bool:
+        """Does the backend choose a single module for layernorm and linear"""
+        return False
+
+    def column_parallel_layer_norm_linear(self) -> Optional[type]:
+        """Which module for sequential layernorm and linear"""
+        return None
+
+    def layer_norm(
+        self, rms_norm: bool = False, for_qk: bool = False, has_residual: bool = False
+    ) -> LayerNormBuilder:
+        """Which module to use for layer norm"""
+        if rms_norm:
+            global LNImpl
+            LNImpl = WrappedTorchNorm
+        return LNImpl
+
+    def core_attention(self) -> type:
+        """Which module to use for attention"""
+        from megatron.core.transformer.flashmask_attention import FlashMaskAttention
+        return FlashMaskAttention
+
+    def grouped_mlp_modules(self, moe_use_grouped_gemm: bool) -> ExpertsBuilder:
+        """Which module and submodules to use for grouped mlp"""
+        return partial(
+            SequentialMLP,
+            submodules=MLPSubmodules(
+                linear_fc1=ColumnParallelLinear,
+                linear_fc2=RowParallelLinear,
+                activation_func=self.activation_func(),
+            ),
+        )
+
+    def activation_func(self) -> TEActivationFunctionBuilder | None:
+        """Which module to use for activation function"""
+        return None

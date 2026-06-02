@@ -56,6 +56,7 @@ class AttnBackend(enum.Enum):
     unfused = 3
     local = 4
     auto = 5
+    flashmask = 6
 
 
 class CudaGraphModule(enum.Enum):

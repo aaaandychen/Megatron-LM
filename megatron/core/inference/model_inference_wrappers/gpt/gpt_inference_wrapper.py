@@ -67,7 +67,7 @@ class GPTInferenceWrapper(AbstractModelInferenceWrapper):
 
         attention_backend = config.attention_backend
 
-        if attention_backend == AttnBackend.local:
+        if attention_backend in (AttnBackend.local, AttnBackend.flashmask):
             attention_mask = get_attention_mask(seq_length)
         elif (
             attention_backend == AttnBackend.flash

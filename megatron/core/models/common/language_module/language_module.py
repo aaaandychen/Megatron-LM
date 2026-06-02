@@ -120,7 +120,7 @@ class LanguageModule(MegatronModule):
             ), f'{env_variable_name} set to {current_value}, but expected {expected_value} for attention backend type {attn_type.name}. unset NVTE_FLASH_ATTN, NVTE_FUSED_ATTN and NVTE_UNFUSED_ATTN. Use the --attention-backend argument if you want to choose between (flash/fused/unfused/auto/local). Default is auto.'
             os.environ[env_variable_name] = str(expected_value)
 
-        if self.config.attention_backend == AttnBackend.local:
+        if self.config.attention_backend in (AttnBackend.local, AttnBackend.flashmask):
             check_and_set_env_variable("NVTE_FLASH_ATTN", 0, AttnBackend.flash)
             check_and_set_env_variable("NVTE_FUSED_ATTN", 0, AttnBackend.flash)
             check_and_set_env_variable("NVTE_UNFUSED_ATTN", 0, AttnBackend.flash)

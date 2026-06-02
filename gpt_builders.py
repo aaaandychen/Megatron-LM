@@ -3,12 +3,14 @@
 from megatron.core.models.gpt import GPTModel
 from megatron.core.models.gpt.gpt_layer_specs import (
     get_gpt_decoder_block_spec,
-    get_gpt_layer_local_spec,
-    get_gpt_layer_with_transformer_engine_spec,
-    get_gpt_layer_with_inference_spec,
-    get_gpt_mtp_block_spec,
     get_gpt_decoder_layer_specs,
+    get_gpt_layer_flashmask_spec,
+    get_gpt_layer_local_spec,
+    get_gpt_layer_with_inference_spec,
+    get_gpt_layer_with_transformer_engine_spec,
+    get_gpt_mtp_block_spec,
 )
+from megatron.core.transformer.enums import AttnBackend
 from megatron.core.models.gpt.experimental_attention_variant_module_specs import (
     get_transformer_block_with_experimental_attention_variant_spec,
 )
@@ -110,7 +112,15 @@ def _get_transformer_layer_spec(use_te, config):
     Returns:
         transformer_layer_spec: The transformer layer specification
     """
-    if use_te:
+    if config.attention_backend == AttnBackend.flashmask:
+        return get_gpt_layer_flashmask_spec(
+            config.num_moe_experts,
+            config.moe_grouped_gemm,
+            config.qk_layernorm,
+            config.multi_latent_attention,
+            normalization=config.normalization,
+        )
+    elif use_te:
         return get_gpt_layer_with_transformer_engine_spec(
             config.num_moe_experts,
             config.moe_grouped_gemm,
